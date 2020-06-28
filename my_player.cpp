@@ -11,12 +11,28 @@ int rand_list[100] = {1,5,7,6,9,2,4,466,2,3,566,78,492,231,48,543,5468,84,31,56,
 int num_rand = 0;
 std::ofstream fout2("my_log.txt"); //new by me
 std::ofstream fstate_value("my_log_state_value.txt");
-
+int score_map[8][8] =
+{
+    {200 , -100 , 50 , 50 , 50 , 50 , -100 , 200  },
+    {-100, -200 , 5  , 5  , 5  , 5  , -200 , -100 },
+    {50  , 5    , 10 , 10 , 10 , 10 , 5    ,  50  },
+    {50  , 5    , 10 , 5  , 5  , 10 , 5    ,  50  },
+    {50  , 5    , 10 , 5  , 5  , 10 , 5    ,  50  },
+    {50  , 5    , 10 , 10 , 10 , 10 , 5    ,  50  },
+    {-100, -200 , 5  , 5  , 5  , 5  , -200 , -100 },
+    {200 , -100 , 50 , 50 , 50 , 50 , -100 , 200  }
+};
 
 struct Point {
     int x, y;
 	Point() : Point(0, 0) {}
 	Point(float x, float y) : x(x), y(y) {}
+	Point& operator=(const Point& rhs)
+	{
+	    this->x = rhs.x;
+	    this->y = rhs.y;
+	    return *this;
+	}
 	bool operator==(const Point& rhs) const {
 		return x == rhs.x && y == rhs.y;
 	}
@@ -49,6 +65,8 @@ public:
     int cur_player;
     bool done;
     int winner;
+    Point prev_action;
+    int num_prev_flip = 0;
 private:
     //如果現在是player 1 的話，那3-1=2  next player 2
     int get_next_player(int player) const {
@@ -107,6 +125,7 @@ private:
                 if (is_disc_at(p, cur_player)) {
                     for (Point s: discs) {
                         set_disc(s, cur_player);
+                        //num_prev_flip++;
                     }
                     disc_count[cur_player] += discs.size();
                     disc_count[get_next_player(cur_player)] -= discs.size();
@@ -131,6 +150,12 @@ public:
         this-> next_valid_spots = in.next_valid_spots;
         this-> disc_count = in.disc_count;
         this-> cur_player = in.cur_player;
+        this->disc_count = in.disc_count;
+        this->cur_player = in.cur_player;
+        this->done = in.done;
+        this->winner = in.winner;
+        this->prev_action = in.prev_action;
+        this->num_prev_flip = in.num_prev_flip;
     }
 
     std::vector<Point> get_valid_spots() const {
@@ -155,6 +180,8 @@ public:
             return false;
         }
         set_disc(p, cur_player);//將棋盤p處紀錄下哪個顏色
+
+        prev_action = p;  //new by me 紀錄下是哪一個動作造成現在的盤面
         disc_count[cur_player]++;
         disc_count[EMPTY]--;
         flip_discs(p);
@@ -188,7 +215,7 @@ int player;
 const int SIZE = 8;
 std::array<std::array<int, SIZE>, SIZE> board;
 std::vector<Point> next_valid_spots;
-int build_tree(int ,OthelloBoard);  //new by me
+int build_tree(int ,OthelloBoard,int ,int);  //new by me
 void debug(OthelloBoard ,int  ,int );
 
 
@@ -215,19 +242,30 @@ void write_valid_spot(std::ofstream& fout) {
     int n_valid_spots = next_valid_spots.size();
     srand(time(NULL));
     Point p = next_valid_spots[0];
+    int max_val = INT_MIN;
     fout2<<"THE ALL PLAYER = "<<player;
     fout2<<"    "<<((player==1)?'O':'X');
     fout2<<"\n\n\n\n";
+    int alpha =INT_MIN;
+    int beta = INT_MAX;
     for(auto pp: next_valid_spots)
     {
-
         OthelloBoard new_board(board);
         new_board.cur_player = player;
-        //fout2<<"throw cur player: "<<new_board.cur_player<<"\n";
         new_board.put_disc(pp);
-        build_tree(1,new_board);
+        int n = build_tree(1,new_board,alpha,beta);
+        fstate_value<<"for point("<<pp.x<<", "<<pp.y<<")   value = "<<n<<endl;
+        if(n>max_val)
+        {
+            max_val = n;
+            alpha = n;
 
+            p = pp;
+            fout << p.x << " " << p.y << std::endl;
+            fout.flush();
+        }
     }
+    fstate_value<<"fiinal choose point("<<p.x<<", "<<p.y<<")   value = "<<max_val<<endl;
     // Remember to flush the output to ensure the last action is written to file.
     fout << p.x << " " << p.y << std::endl;
     fout.flush();
@@ -246,24 +284,52 @@ int main(int, char** argv) {
     return 0;
 }
 
-int build_tree(int depth , OthelloBoard cur_board)
+int build_tree(int depth , OthelloBoard cur_board , int alpha ,int beta)
 {
     int state_value;
-    if(depth == DEPTH_MAX)
+    if(depth == DEPTH_MAX)//到達我要的深度
     {
-        state_value = rand_list[num_rand++];
+        if(cur_board.cur_player!=player)  //若現在棋盤的下個玩家相反的話，那syaye_value也要相反
+        {
+            state_value = INT_MAX;
+            for(auto p:cur_board.next_valid_spots)
+            {
+                int n= - score_map[p.x][p.y];
+                fout2<<"next spots ("<<p.x<<","<<p.y<<")  n= "<<n<<endl;
+                if(n<state_value) state_value = n;
+            }
+            //加負號   因為讓敵人走到c位要加分
+
+        }
+        else
+        {
+            state_value = INT_MIN;
+            for(auto p:cur_board.next_valid_spots)
+            {
+                int n=state_value =  score_map[cur_board.prev_action.x][cur_board.prev_action.y];;
+                if(n>state_value) state_value = n;
+            }
+        }
         debug(cur_board,depth,state_value);
         return state_value;
     }
+
     if(cur_board.cur_player == player) //取max
     {
         state_value = INT_MIN;
         for(auto pp: cur_board.next_valid_spots)
         {
+            if(alpha>beta) break;
             OthelloBoard new_board(cur_board);
             new_board.put_disc(pp);
-            int n = build_tree(depth+1,new_board);
-            if(n>state_value) state_value = n;
+            int n = build_tree(depth+1,new_board,alpha,beta);
+            n -= score_map[cur_board.prev_action.x][cur_board.prev_action.y]; //表示prev_avtion是敵方
+            if(n>state_value)
+            {
+                alpha = n;
+                state_value = n;
+            }
+
         }
     }
     else // 取min
@@ -271,10 +337,17 @@ int build_tree(int depth , OthelloBoard cur_board)
         state_value = INT_MAX;
         for(auto pp: cur_board.next_valid_spots)
         {
+            if(alpha>beta) break;
+
             OthelloBoard new_board(cur_board);
             new_board.put_disc(pp);
-            int n = build_tree(depth+1,new_board);
-            if(n<state_value) state_value = n;
+            int n = build_tree(depth+1,new_board ,alpha,beta);
+            n += score_map[cur_board.prev_action.x][cur_board.prev_action.y];
+            if(n<state_value)
+            {
+                state_value = n;
+                beta = n;
+            }
         }
     }
     debug(cur_board,depth,state_value);
@@ -287,6 +360,8 @@ void debug(OthelloBoard cur_board , int depth ,int value)
     fout2<<"===============================\n";
     fout2<<"depth = "<<depth<<"\n";
     fout2<<"state value = "<<value<<"\n";
+    fout2<<"num_prev_flip = "<<cur_board.num_prev_flip<<"\n";
+    fout2<<"prev_action = ("<<cur_board.prev_action.x<<","<<cur_board.prev_action.y<<")\n";
     fout2<<"  ";
     for(int i=0;i<SIZE ;i++) fout2<<i<<" ";
     fout2<<"\n------------------------\n";
