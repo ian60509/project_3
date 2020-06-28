@@ -1,3 +1,4 @@
+
 #include <iostream>
 #include <fstream>
 #include <array>
@@ -5,7 +6,9 @@
 #include <cstdlib>
 #include <ctime>
 #include <climits>
-#define DEPTH_MAX 3
+#define DEPTH_MAX 5
+#define FLIP_WEIGHT 20
+#define STABILITY_WEIGHT 20
 using namespace std;
 int rand_list[100] = {1,5,7,6,9,2,4,466,2,3,566,78,492,231,48,543,5468,84,31,56,3,54,22,13,4,54,3,2,2354,6,2332,4,446,32121,54,3,3,21};
 int num_rand = 0;
@@ -67,6 +70,7 @@ public:
     int winner;
     Point prev_action;
     int num_prev_flip = 0;
+    int stability = 0;
 private:
     //如果現在是player 1 的話，那3-1=2  next player 2
     int get_next_player(int player) const {
@@ -112,22 +116,30 @@ private:
     }
     //處理落子之後的翻轉
     void flip_discs(Point center) {
+
+        int flip_before_n = disc_count[cur_player];
         for (Point dir: directions) {
             // Move along the direction while testing.
             Point p = center + dir;
-            if (!is_disc_at(p, get_next_player(cur_player)))
+            if (!is_disc_at(p, get_next_player(cur_player))) //若是我這個方向的鄰居並非對手的話就跳過
                 continue;
 
             std::vector<Point> discs({p});
 
-            p = p + dir;
+            p = p + dir; //再往同個方向推一顆
+            //確認p點非空的
             while (is_spot_on_board(p) && get_disc(p) != EMPTY) {
                 if (is_disc_at(p, cur_player)) {
                     for (Point s: discs) {
                         set_disc(s, cur_player);
-                        //num_prev_flip++;
                     }
+
+                    //fstate_value<<"before  flip number = "<<num_prev_flip<<endl;
                     disc_count[cur_player] += discs.size();
+
+                    //num_prev_flip += discs.size();
+
+                    //fstate_value<<"after  flip number = "<<num_prev_flip<<endl;
                     disc_count[get_next_player(cur_player)] -= discs.size();
                     break;
                 }
@@ -135,6 +147,8 @@ private:
                 p = p + dir;
             }
         }
+        num_prev_flip = disc_count[cur_player] - flip_before_n;
+        fstate_value<<"  flip number = "<<num_prev_flip<<endl;
     }
 public:
     OthelloBoard() {
@@ -156,6 +170,7 @@ public:
         this->winner = in.winner;
         this->prev_action = in.prev_action;
         this->num_prev_flip = in.num_prev_flip;
+        this->stability = in.stability;
     }
 
     std::vector<Point> get_valid_spots() const {
@@ -179,8 +194,9 @@ public:
             done = true;
             return false;
         }
-        set_disc(p, cur_player);//將棋盤p處紀錄下哪個顏色
 
+        set_disc(p, cur_player);//將棋盤p處紀錄下哪個顏色
+        //set_stability(p);
         prev_action = p;  //new by me 紀錄下是哪一個動作造成現在的盤面
         disc_count[cur_player]++;
         disc_count[EMPTY]--;
@@ -205,7 +221,25 @@ public:
         }
         return true;
     }
-
+    int set_stability(Point action)
+    {
+        for(auto d: directions)
+        {
+            Point p = action;
+            bool meet_different = false;
+            while(p.x>=0 && p.x<=SIZE &&p.y>=0 && p.y<=SIZE)
+            {
+                p.x += d.x;
+                p.y += d.y;
+                if(get_disc(p) == get_next_player(cur_player)) //遇到敵人了
+                {
+                    meet_different = true;
+                    break;
+                }
+            }
+            if(meet_different == false) stability++;
+        }
+    }
 
 
 };
@@ -253,8 +287,9 @@ void write_valid_spot(std::ofstream& fout) {
         OthelloBoard new_board(board);
         new_board.cur_player = player;
         new_board.put_disc(pp);
-        int n = build_tree(1,new_board,alpha,beta);
-        fstate_value<<"for point("<<pp.x<<", "<<pp.y<<")   value = "<<n<<endl;
+        int n = build_tree(1,new_board,alpha,beta) ;
+
+        //fstate_value<<"for point("<<pp.x<<", "<<pp.y<<")   value = "<<n<<endl;
         if(n>max_val)
         {
             max_val = n;
@@ -294,8 +329,9 @@ int build_tree(int depth , OthelloBoard cur_board , int alpha ,int beta)
             state_value = INT_MAX;
             for(auto p:cur_board.next_valid_spots)
             {
-                int n= - score_map[p.x][p.y];
-                fout2<<"next spots ("<<p.x<<","<<p.y<<")  n= "<<n<<endl;
+                int n= - (score_map[p.x][p.y]+cur_board.num_prev_flip*FLIP_WEIGHT );
+                n -= cur_board.stability* STABILITY_WEIGHT;
+                //fout2<<"next spots ("<<p.x<<","<<p.y<<")  n= "<<n<<endl;
                 if(n<state_value) state_value = n;
             }
             //加負號   因為讓敵人走到c位要加分
@@ -306,7 +342,8 @@ int build_tree(int depth , OthelloBoard cur_board , int alpha ,int beta)
             state_value = INT_MIN;
             for(auto p:cur_board.next_valid_spots)
             {
-                int n=state_value =  score_map[cur_board.prev_action.x][cur_board.prev_action.y];;
+                int n =  score_map[p.x][p.y]+cur_board.num_prev_flip*FLIP_WEIGHT;
+                n += cur_board.stability * STABILITY_WEIGHT;
                 if(n>state_value) state_value = n;
             }
         }
@@ -323,7 +360,8 @@ int build_tree(int depth , OthelloBoard cur_board , int alpha ,int beta)
             OthelloBoard new_board(cur_board);
             new_board.put_disc(pp);
             int n = build_tree(depth+1,new_board,alpha,beta);
-            n -= score_map[cur_board.prev_action.x][cur_board.prev_action.y]; //表示prev_avtion是敵方
+            n -= (score_map[cur_board.prev_action.x][cur_board.prev_action.y] + cur_board.num_prev_flip*FLIP_WEIGHT); //表示prev_avtion是敵方
+            n -= cur_board.stability * STABILITY_WEIGHT;
             if(n>state_value)
             {
                 alpha = n;
@@ -342,7 +380,8 @@ int build_tree(int depth , OthelloBoard cur_board , int alpha ,int beta)
             OthelloBoard new_board(cur_board);
             new_board.put_disc(pp);
             int n = build_tree(depth+1,new_board ,alpha,beta);
-            n += score_map[cur_board.prev_action.x][cur_board.prev_action.y];
+            n += score_map[cur_board.prev_action.x][cur_board.prev_action.y] + cur_board.num_prev_flip*FLIP_WEIGHT;
+            n += cur_board.stability * STABILITY_WEIGHT;
             if(n<state_value)
             {
                 state_value = n;
@@ -362,6 +401,7 @@ void debug(OthelloBoard cur_board , int depth ,int value)
     fout2<<"state value = "<<value<<"\n";
     fout2<<"num_prev_flip = "<<cur_board.num_prev_flip<<"\n";
     fout2<<"prev_action = ("<<cur_board.prev_action.x<<","<<cur_board.prev_action.y<<")\n";
+    fout2<<"stability = "<<cur_board.stability<<endl;
     fout2<<"  ";
     for(int i=0;i<SIZE ;i++) fout2<<i<<" ";
     fout2<<"\n------------------------\n";
